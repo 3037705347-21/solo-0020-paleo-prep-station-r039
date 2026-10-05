@@ -113,6 +113,12 @@ func (s *Service) StartCure(
 
 	var created domain.CureRecord
 	err := s.repo.Mutate(func(m *repository.Mutation) error {
+		// 同一登记请求重复到达时，直接返回它第一次产生的隔离记录，
+		// 绝不创建第二份隔离或改变方案与历史。
+		if existing, found := m.FindCureRequest(planID, "start", request.RequestID); found {
+			created = existing
+			return nil
+		}
 		plan, ok := m.GetPlan(planID)
 		if !ok {
 			return notFoundPlan(planID)
@@ -160,14 +166,22 @@ func (s *Service) CompleteCure(
 
 	var completed domain.CureRecord
 	err := s.repo.Mutate(func(m *repository.Mutation) error {
+		// 同一解除请求重复到达时，返回该请求第一次确认后的隔离记录，
+		// 不重复改写、不追加副本。
+		if existing, found := m.FindCureRequest(planID, "complete", request.RequestID); found {
+			completed = existing
+			return nil
+		}
 		record, found := m.FindCure(planID, cureID)
 		if !found {
 			return contracts.NotFound("cure_not_found", "未找到固化隔离 "+cureID)
 		}
-		if err := record.Complete(request.CompletedBy, request.Note, s.now()); err != nil {
+		if err := record.Complete(request.RequestID, request.CompletedBy, request.Note, s.now()); err != nil {
 			return err
 		}
-		m.AppendCure(record)
+		if !m.ReplaceCure(record) {
+			return contracts.NotFound("cure_not_found", "未找到固化隔离 "+cureID)
+		}
 		m.RememberCureRequest(planID, "complete", request.RequestID, cureID)
 		completed = record
 		return nil

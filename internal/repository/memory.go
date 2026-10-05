@@ -179,11 +179,7 @@ func (m *Mutation) PutRelease(value domain.ReleaseRecord) {
 
 func (m *Mutation) ListCures(planID string) []domain.CureRecord {
 	values := make([]domain.CureRecord, 0, len(m.state.cures[planID]))
-	for _, value := range m.state.cures[planID] {
-		if value.Status == domain.CureCompleted {
-			values = append(values, value)
-		}
-	}
+	values = append(values, m.state.cures[planID]...)
 	sort.Slice(values, func(i, j int) bool {
 		if values[i].StartedAt.Equal(values[j].StartedAt) {
 			return values[i].ID < values[j].ID
@@ -204,7 +200,7 @@ func (m *Mutation) FindCure(planID string, cureID string) (domain.CureRecord, bo
 
 func (m *Mutation) FindActiveCure(planID string) (domain.CureRecord, bool) {
 	for _, value := range m.state.cures[planID] {
-		if value.Status == domain.CureCompleted {
+		if value.Status == domain.CureActive {
 			return value, true
 		}
 	}
@@ -228,8 +224,14 @@ func (m *Mutation) AppendCure(value domain.CureRecord) {
 }
 
 func (m *Mutation) ReplaceCure(value domain.CureRecord) bool {
-	m.AppendCure(value)
-	return true
+	records := m.state.cures[value.PlanID]
+	for index := range records {
+		if records[index].ID == value.ID {
+			records[index] = value
+			return true
+		}
+	}
+	return false
 }
 
 func (m *Mutation) RememberCureRequest(

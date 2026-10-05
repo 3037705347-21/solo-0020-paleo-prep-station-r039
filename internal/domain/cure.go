@@ -72,7 +72,15 @@ func (c CureRecord) IsActive() bool {
 	return c.Status == CureActive
 }
 
-func (c *CureRecord) Complete(completedBy string, note string, now time.Time) error {
+func (c *CureRecord) Complete(
+	requestID string,
+	completedBy string,
+	note string,
+	now time.Time,
+) error {
+	if _, err := requiredText("请求标识", requestID, 80); err != nil {
+		return err
+	}
 	if c.Status != CureActive {
 		return contracts.Conflict("cure_not_completable", "只有未结束的固化隔离可以确认解除")
 	}
