@@ -27,7 +27,10 @@ func (s *Service) LogProgress(
 		if !ok {
 			return notFoundSpecimen(plan.SpecimenID)
 		}
-		if _, active := m.FindActiveCure(planID); active {
+		// While an unfinished isolation is registered, progress must be
+		// rejected outright: returning here leaves plan, specimen and history
+		// untouched because the mutation is discarded on error.
+		if _, hasActiveCure := m.FindActiveCure(planID); hasActiveCure {
 			return contracts.Conflict("cure_active", "固化隔离期间不能继续记录制备进度")
 		}
 		previous := m.ProgressForPlan(planID)

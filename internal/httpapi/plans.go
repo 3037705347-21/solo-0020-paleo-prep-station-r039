@@ -56,13 +56,18 @@ func (api *API) startCure(w http.ResponseWriter, r *http.Request) {
 	if !decodeJSON(w, r, &request) {
 		return
 	}
-	value, err := api.service.StartCure(r.Context(), r.PathValue("id"), request)
+	result, err := api.service.StartCure(r.Context(), r.PathValue("id"), request)
 	if err != nil {
 		writeError(w, err)
 		return
 	}
-	w.Header().Set("Location", "/plans/"+value.PlanID+"/cures/"+value.ID)
-	writeJSON(w, http.StatusCreated, value)
+	status := http.StatusCreated
+	if result.Replayed {
+		status = http.StatusOK
+	} else {
+		w.Header().Set("Location", "/plans/"+result.Record.PlanID+"/cures/"+result.Record.ID)
+	}
+	writeJSON(w, status, result.Record)
 }
 
 func (api *API) completeCure(w http.ResponseWriter, r *http.Request) {
@@ -70,7 +75,7 @@ func (api *API) completeCure(w http.ResponseWriter, r *http.Request) {
 	if !decodeJSON(w, r, &request) {
 		return
 	}
-	value, err := api.service.CompleteCure(
+	result, err := api.service.CompleteCure(
 		r.Context(),
 		r.PathValue("id"),
 		r.PathValue("cureID"),
@@ -80,5 +85,5 @@ func (api *API) completeCure(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, value)
+	writeJSON(w, http.StatusOK, result.Record)
 }

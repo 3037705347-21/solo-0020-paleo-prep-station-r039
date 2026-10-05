@@ -42,7 +42,7 @@ func NewCureRecord(
 	if plan.Status != PlanApproved && plan.Status != PlanActive {
 		return CureRecord{}, contracts.Conflict("plan_not_curable", "当前方案状态不能登记固化隔离")
 	}
-	request, err := requiredText("请求标识", requestID, 80)
+	request, err := ValidateCureRequestID(requestID)
 	if err != nil {
 		return CureRecord{}, err
 	}
@@ -66,6 +66,12 @@ func NewCureRecord(
 		StartedAt:  stamp,
 		UpdatedAt:  stamp,
 	}, nil
+}
+
+// ValidateCureRequestID normalizes the client-supplied idempotency key shared by
+// registration and completion requests.
+func ValidateCureRequestID(requestID string) (string, error) {
+	return requiredText("请求标识", requestID, 80)
 }
 
 func (c CureRecord) IsActive() bool {

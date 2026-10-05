@@ -177,13 +177,10 @@ func (m *Mutation) PutRelease(value domain.ReleaseRecord) {
 	m.state.releases[value.ID] = value
 }
 
+// ListCures returns the full cure history for a plan, including the currently
+// active isolation, ordered from the oldest registration to the newest.
 func (m *Mutation) ListCures(planID string) []domain.CureRecord {
-	values := make([]domain.CureRecord, 0, len(m.state.cures[planID]))
-	for _, value := range m.state.cures[planID] {
-		if value.Status == domain.CureCompleted {
-			values = append(values, value)
-		}
-	}
+	values := append([]domain.CureRecord(nil), m.state.cures[planID]...)
 	sort.Slice(values, func(i, j int) bool {
 		if values[i].StartedAt.Equal(values[j].StartedAt) {
 			return values[i].ID < values[j].ID
@@ -202,9 +199,10 @@ func (m *Mutation) FindCure(planID string, cureID string) (domain.CureRecord, bo
 	return domain.CureRecord{}, false
 }
 
+// FindActiveCure returns the single unfinished isolation of a plan, if any.
 func (m *Mutation) FindActiveCure(planID string) (domain.CureRecord, bool) {
 	for _, value := range m.state.cures[planID] {
-		if value.Status == domain.CureCompleted {
+		if value.IsActive() {
 			return value, true
 		}
 	}
@@ -227,9 +225,18 @@ func (m *Mutation) AppendCure(value domain.CureRecord) {
 	m.state.cures[value.PlanID] = append(m.state.cures[value.PlanID], value)
 }
 
+// ReplaceCure updates the stored record with the same plan and cure ID in
+// place, keeping the history a single row per isolation. It returns false
+// when no matching record exists.
 func (m *Mutation) ReplaceCure(value domain.CureRecord) bool {
-	m.AppendCure(value)
-	return true
+	values := m.state.cures[value.PlanID]
+	for i := range values {
+		if values[i].ID == value.ID {
+			values[i] = value
+			return true
+		}
+	}
+	return false
 }
 
 func (m *Mutation) RememberCureRequest(

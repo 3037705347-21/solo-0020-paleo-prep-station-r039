@@ -31,7 +31,13 @@ go run ./cmd/paleo-prep-station --addr 127.0.0.1:18133
 - `GET /plans/{id}`
 - `POST /plans/{id}/approval`
 - `POST /plans/{id}/progress`
+- `POST /plans/{id}/cures`
+- `POST /plans/{id}/cures/{cureID}/completion`
 - `POST /specimens/{id}/release`
+
+## 固化隔离
+
+表面加固后，负责人可凭唯一 `request_id` 登记进入密闭固化（`POST /plans/{id}/cures`）。同一方案同一时刻至多存在一个未结束隔离；隔离期间进度提交返回 `409`，且不改动方案、标本或历史。由另一名人员确认解除（`POST /plans/{id}/cures/{cureID}/completion`）后恢复记录。登记与解除都按 `request_id` 幂等：重复或重试到达的同一请求只对应首次的有效结果，首次成功返回 `201`（解除为 `200`），重放返回同一条记录与 `200`。`GET /plans/{id}` 的 `cures` 字段返回包含进行中记录在内的完整固化历史。
 
 ## 本地验证
 
@@ -42,6 +48,7 @@ go run ./cmd/workflowcheck --workflow register-specimen
 go run ./cmd/workflowcheck --workflow approve-prep-plan
 go run ./cmd/workflowcheck --workflow log-preparation
 go run ./cmd/workflowcheck --workflow release-for-study
+go run ./cmd/workflowcheck --workflow cure-isolation
 ```
 
 这些检查会启动临时 HTTP 处理器并调用真实公共路由。

@@ -102,20 +102,38 @@ func (s *Service) GetPlan(ctx context.Context, planID string) (PlanSnapshot, err
 	return snapshot, err
 }
 
+// CureResult is the outcome of a start-cure request. Replayed is true when the
+// request identifier was already applied, in which case Record is the single
+// cure created by the first arrival and no new isolation is registered.
+type CureResult struct {
+	Record   domain.CureRecord
+	Replayed bool
+}
+
 func (s *Service) StartCure(
 	ctx context.Context,
 	planID string,
 	request contracts.StartCureRequest,
-) (domain.CureRecord, error) {
+) (CureResult, error) {
 	if err := ctx.Err(); err != nil {
-		return domain.CureRecord{}, err
+		return CureResult{}, err
 	}
 
-	var created domain.CureRecord
+	var result CureResult
 	err := s.repo.Mutate(func(m *repository.Mutation) error {
 		plan, ok := m.GetPlan(planID)
 		if !ok {
 			return notFoundPlan(planID)
+		}
+		requestID, err := domain.ValidateCureRequestID(request.RequestID)
+		if err != nil {
+			return err
+		}
+		// A repeated registration request always resolves to the cure created
+		// by its first arrival, regardless of which isolation round is open.
+		if existing, found := m.FindCureRequest(planID, "start", requestID); found {
+			result = CureResult{Record: existing, Replayed: true}
+			return nil
 		}
 		if active, found := m.FindActiveCure(planID); found {
 			return contracts.Conflict(
@@ -126,7 +144,7 @@ func (s *Service) StartCure(
 		record, err := domain.NewCureRecord(
 			s.nextID("cure"),
 			plan,
-			request.RequestID,
+			requestID,
 			request.StartedBy,
 			request.Note,
 			s.now(),
@@ -140,12 +158,12 @@ func (s *Service) StartCure(
 			}
 		}
 		m.AppendCure(record)
-		m.RememberCureRequest(planID, "start", request.RequestID, record.ID)
+		m.RememberCureRequest(planID, "start", requestID, record.ID)
 		m.PutPlan(plan)
-		created = record
+		result = CureResult{Record: record}
 		return nil
 	})
-	return created, err
+	return result, err
 }
 
 func (s *Service) CompleteCure(
@@ -153,13 +171,32 @@ func (s *Service) CompleteCure(
 	planID string,
 	cureID string,
 	request contracts.CompleteCureRequest,
-) (domain.CureRecord, error) {
+) (CureResult, error) {
 	if err := ctx.Err(); err != nil {
-		return domain.CureRecord{}, err
+		return CureResult{}, err
 	}
 
-	var completed domain.CureRecord
+	var result CureResult
 	err := s.repo.Mutate(func(m *repository.Mutation) error {
+		if _, ok := m.GetPlan(planID); !ok {
+			return notFoundPlan(planID)
+		}
+		requestID, err := domain.ValidateCureRequestID(request.RequestID)
+		if err != nil {
+			return err
+		}
+		// A repeated completion request resolves to the same cure and result,
+		// so a retried or replayed request can never close a later isolation.
+		if existing, found := m.FindCureRequest(planID, "complete", requestID); found {
+			if existing.ID != cureID {
+				return contracts.Conflict(
+					"cure_request_mismatch",
+					"该解除请求已用于另一条固化隔离",
+				)
+			}
+			result = CureResult{Record: existing, Replayed: true}
+			return nil
+		}
 		record, found := m.FindCure(planID, cureID)
 		if !found {
 			return contracts.NotFound("cure_not_found", "未找到固化隔离 "+cureID)
@@ -167,12 +204,14 @@ func (s *Service) CompleteCure(
 		if err := record.Complete(request.CompletedBy, request.Note, s.now()); err != nil {
 			return err
 		}
-		m.AppendCure(record)
-		m.RememberCureRequest(planID, "complete", request.RequestID, cureID)
-		completed = record
+		if !m.ReplaceCure(record) {
+			return contracts.NotFound("cure_not_found", "未找到固化隔离 "+cureID)
+		}
+		m.RememberCureRequest(planID, "complete", requestID, cureID)
+		result = CureResult{Record: record}
 		return nil
 	})
-	return completed, err
+	return result, err
 }
 
 func (s *Service) ListPlansForSpecimen(
